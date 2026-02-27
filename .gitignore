@@ -1,0 +1,10 @@
+__pycache__/
+build/
+dist/
+*.spec
+Data_All/
+Data_test/
+Data_raw/
+*.xlsx
+*.xlsm
+~$*.xlsx
