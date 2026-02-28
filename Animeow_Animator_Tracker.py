@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, 
     QTextEdit, QTreeWidget, QTreeWidgetItem, QHeaderView, QFrame,
-    QComboBox
+    QComboBox, QTabWidget
 )
 from PySide6.QtGui import QIcon, QFont, QColor, QPixmap
 from PySide6.QtCore import Qt, QThread, Signal, QMetaObject, Q_ARG
@@ -19,6 +19,15 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+def get_folder_suffix(folder_path):
+    """
+    Finds the name of the folder that contains a 'Raw' subdirectory.
+    """
+    for root, dirs, files in os.walk(folder_path):
+        if 'Raw' in dirs:
+            return os.path.basename(root)
+    return None
 
 class Worker(QThread):
     progress = Signal(str)
@@ -110,10 +119,20 @@ class AnimeowTrackerApp(QMainWindow):
             }
         """)
 
-        # Main Central Widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        # Main Tabs
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+        
+        self.tab_process = QWidget()
+        self.tab_animeowee = QWidget()
+        self.tab_project = QWidget()
+        
+        self.tabs.addTab(self.tab_process, "Xử Lý Dữ Liệu")
+        self.tabs.addTab(self.tab_animeowee, "Kết Quả Animeowee")
+        self.tabs.addTab(self.tab_project, "Kết Quả Dự Án")
+
+        # Tab 1: Processing UI
+        main_layout = QVBoxLayout(self.tab_process)
         main_layout.setContentsMargins(25, 25, 25, 25)
         main_layout.setSpacing(15)
 
@@ -121,6 +140,7 @@ class AnimeowTrackerApp(QMainWindow):
         logo_label = QLabel()
         logo_label.setAlignment(Qt.AlignCenter)
         logo_path = resource_path("Animeow_logo.jpg")
+            
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             # Scale
@@ -181,10 +201,14 @@ class AnimeowTrackerApp(QMainWindow):
         main_layout.addWidget(self.log_text)
 
         # Footer
-        footer_label = QLabel("Developed by Tool Team - Qt/PySide6 Edition")
+        footer_label = QLabel("Developed by Animeow Studio - Qt/PySide6 Edition")
         footer_label.setAlignment(Qt.AlignCenter)
         footer_label.setStyleSheet("color: #808080; font-size: 11px;")
         main_layout.addWidget(footer_label)
+
+        # Setup Tab 2 & 3: Results UI
+        self.setup_tab2_animeowee_ui()
+        self.setup_tab3_project_ui()
 
         # Khởi điểm
         self.write_log("[HỆ THỐNG]: Phiên bản Animeow Animator Tracker V2 đã sẵn sàng!")
@@ -227,101 +251,303 @@ class AnimeowTrackerApp(QMainWindow):
         
         if success:
             QMessageBox.information(self, "Hoàn Thành", "Quá trình xử lý dữ liệu đã trơn tru thành công!")
+            self.refresh_month_selectors()
         else:
             QMessageBox.warning(self, "Cảnh Báo", "Có lỗi xảy ra trong quá trình xử lý.\nVui lòng xem chi tiết trên dòng Log!")
 
-    def view_results(self):
-        import pandas as pd
-        folder_path = self.path_entry.text()
-        if not folder_path:
-            return
-            
-        total_folder = os.path.join(folder_path, 'Total')
-        total_file = os.path.join(total_folder, 'Total.xlsx')
-        if not os.path.exists(total_file):
-            QMessageBox.information(self, "Thông Báo", "Chưa có dữ liệu thống kê. Vui lòng chạy Xử Lý trước!")
-            return
-            
-        try:
-            # Tạo popup window Qt
-            self.result_window = QMainWindow(self)
-            self.result_window.setWindowTitle("Tra Cứu Kết Quả (Animeow Tracker)")
-            self.result_window.setMinimumSize(800, 500)
-            
-            # Central Widget for popup
-            central = QWidget()
-            central.setStyleSheet("background-color: #1e1e1e;")
-            self.result_window.setCentralWidget(central)
-            layout = QVBoxLayout(central)
-            
-            # Khung control (Combobox chọn Animator)
-            control_layout = QHBoxLayout()
-            label = QLabel("🔎 Chọn Animator / Chế độ xem:")
-            label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
-            control_layout.addWidget(label)
-            
-            self.combo_box = QComboBox()
-            self.combo_box.setStyleSheet("background-color: #2d2d30; color: #e0e0e0; padding: 5px; border-radius: 3px; border: 1px solid #3e3e42;")
-            self.combo_box.addItem("Tổng Hợp Tất Cả (Total)")
-            
-            # Lấy danh sách các file excel trong thư mục Total (loại trừ Total.xlsx và Data_All.xlsx)
-            animator_files = [f for f in os.listdir(total_folder) if f.endswith('.xlsx') and f not in ('Total.xlsx', 'Data_All.xlsx')]
-            animator_names = [os.path.splitext(f)[0] for f in animator_files]
-            
-            for name in sorted(animator_names):
-                self.combo_box.addItem(name)
-                
-            control_layout.addWidget(self.combo_box)
-            control_layout.addStretch()
-            layout.addLayout(control_layout)
-            
-            # Tạo Treeview
-            self.tree = QTreeWidget()
-            layout.addWidget(self.tree)
-            
-            # Hàm cập nhật bảng dữ liệu khi đổi Combobox
-            def update_table(index):
-                self.tree.clear()
-                selection = self.combo_box.currentText()
-                
-                if selection == "Tổng Hợp Tất Cả (Total)":
-                    file_to_load = total_file
-                else:
-                    file_to_load = os.path.join(total_folder, f"{selection}.xlsx")
-                
-                if os.path.exists(file_to_load):
-                    try:
-                        df = pd.read_excel(file_to_load)
-                        self.tree.setColumnCount(len(df.columns))
-                        self.tree.setHeaderLabels(df.columns)
-                        
-                        # Đổ dữ liệu
-                        for idx, row in df.iterrows():
-                            item = QTreeWidgetItem([str(val) for val in row])
-                            self.tree.addTopLevelItem(item)
-                            
-                        # Resize column
-                        for i in range(len(df.columns)):
-                            self.tree.resizeColumnToContents(i)
-                    except Exception as e:
-                        QMessageBox.critical(self.result_window, "Lỗi", f"Không thể lấy nội dung bảng:\n{e}")
+    def find_total_folders(self, root_path):
+        """
+        Tìm tất cả các thư mục kết quả (Total_*)
+        """
+        total_folders = []
+        for root, dirs, files in os.walk(root_path):
+            for d in dirs:
+                if d.startswith('Total_'):
+                    total_folders.append(os.path.join(root, d))
+        return sorted(total_folders, reverse=True)
 
-            # Gắn sự kiện thay đổi lựa chọn
-            self.combo_box.currentIndexChanged.connect(update_table)
+    def setup_tab2_animeowee_ui(self):
+        layout = QVBoxLayout(self.tab_animeowee)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
+        
+        control_layout = QHBoxLayout()
+        
+        month_label = QLabel("📅 Chọn Tháng:")
+        month_label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
+        control_layout.addWidget(month_label)
+        
+        self.combo_month_ani = QComboBox()
+        self.combo_month_ani.setStyleSheet("background-color: #2d2d30; color: #4da6ff; padding: 5px; border-radius: 3px; border: 1px solid #3e3e42; font-weight: bold;")
+        control_layout.addWidget(self.combo_month_ani)
+        
+        control_layout.addSpacing(20)
+        
+        label = QLabel("🔎 Chọn Animeowee:")
+        label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
+        control_layout.addWidget(label)
+        
+        self.combo_animeowee = QComboBox()
+        self.combo_animeowee.setStyleSheet("background-color: #2d2d30; color: #e0e0e0; padding: 5px; border-radius: 3px; border: 1px solid #3e3e42;")
+        self.combo_animeowee.addItem("Tổng Hợp Animeowee (Total)")
+        control_layout.addWidget(self.combo_animeowee)
+        
+        self.refresh_btn_ani = QPushButton("🔄 Làm Mới")
+        self.refresh_btn_ani.setCursor(Qt.PointingHandCursor)
+        self.refresh_btn_ani.clicked.connect(self.refresh_animeowee_list)
+        control_layout.addWidget(self.refresh_btn_ani)
+        
+        control_layout.addStretch()
+        layout.addLayout(control_layout)
+        
+        # Thêm nút xem biểu đồ
+        self.chart_btn_ani = QPushButton("🖼️ XEM BIỂU ĐỒ TỔNG KẾT")
+        self.chart_btn_ani.setStyleSheet("background-color: #4da6ff; color: white;")
+        self.chart_btn_ani.setCursor(Qt.PointingHandCursor)
+        self.chart_btn_ani.setVisible(False)
+        self.chart_btn_ani.clicked.connect(self.show_animeowee_chart)
+        layout.addWidget(self.chart_btn_ani)
+        
+        self.tree_animeowee = QTreeWidget()
+        layout.addWidget(self.tree_animeowee)
+        
+        self.combo_month_ani.currentIndexChanged.connect(self.refresh_animeowee_list)
+        self.combo_animeowee.currentIndexChanged.connect(self.update_animeowee_table)
+
+    def setup_tab3_project_ui(self):
+        layout = QVBoxLayout(self.tab_project)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(15)
+        
+        control_layout = QHBoxLayout()
+        
+        month_label = QLabel("📅 Chọn Tháng:")
+        month_label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
+        control_layout.addWidget(month_label)
+        
+        self.combo_month_proj = QComboBox()
+        self.combo_month_proj.setStyleSheet("background-color: #2d2d30; color: #4da6ff; padding: 5px; border-radius: 3px; border: 1px solid #3e3e42; font-weight: bold;")
+        control_layout.addWidget(self.combo_month_proj)
+        
+        control_layout.addSpacing(20)
+        
+        label = QLabel("📁 Chọn Dự Án (Project):")
+        label.setStyleSheet("color: #e0e0e0; font-weight: bold; font-family: 'Segoe UI'; font-size: 13px;")
+        control_layout.addWidget(label)
+        
+        self.combo_project = QComboBox()
+        self.combo_project.setStyleSheet("background-color: #2d2d30; color: #e0e0e0; padding: 5px; border-radius: 3px; border: 1px solid #3e3e42;")
+        self.combo_project.addItem("Tổng Hợp Theo Dự Án (Project)")
+        control_layout.addWidget(self.combo_project)
+        
+        self.refresh_btn_proj = QPushButton("🔄 Làm Mới")
+        self.refresh_btn_proj.setCursor(Qt.PointingHandCursor)
+        self.refresh_btn_proj.clicked.connect(self.refresh_project_list)
+        control_layout.addWidget(self.refresh_btn_proj)
+        
+        control_layout.addStretch()
+        layout.addLayout(control_layout)
+        
+        self.tree_project = QTreeWidget()
+        layout.addWidget(self.tree_project)
+        
+        self.combo_month_proj.currentIndexChanged.connect(self.refresh_project_list)
+        self.combo_project.currentIndexChanged.connect(self.update_project_table)
+
+    def find_total_folders(self, root_path):
+        """
+        Tìm tất cả các thư mục kết quả (Total_*)
+        """
+        total_folders = []
+        for root, dirs, files in os.walk(root_path):
+            for d in dirs:
+                if d.startswith('Total_'):
+                    path = os.path.join(root, d)
+                    suffix = d.replace('Total_', '')
+                    # Đánh dấu năm (4 chữ số) vs tháng (6 chữ số)
+                    display_name = f"📅 NĂM {suffix}" if len(suffix) == 4 else f"🗓️ Tháng {suffix}"
+                    total_folders.append((display_name, path))
+        
+        # Sắp xếp theo tên (Năm lên đầu hoặc theo thứ tự thời gian)
+        return sorted(total_folders, key=lambda x: x[0], reverse=True)
+
+    def refresh_month_selectors(self):
+        root_path = self.path_entry.text()
+        if not root_path: return
+        folders_with_names = self.find_total_folders(root_path)
+        
+        for combo in [self.combo_month_ani, self.combo_month_proj]:
+            combo.blockSignals(True)
+            old_val = combo.currentData()
+            combo.clear()
+            for display_name, path in folders_with_names:
+                combo.addItem(display_name, path)
             
-            # Load lần đầu (chọn Total)
-            update_table(0)
-                        
-            self.result_window.show()
+            idx = combo.findData(old_val)
+            if idx >= 0: combo.setCurrentIndex(idx)
+            elif combo.count() > 0: combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+
+    def refresh_animeowee_list(self):
+        total_folder = self.combo_month_ani.currentData()
+        if not total_folder or not os.path.exists(total_folder):
+            self.combo_animeowee.clear()
+            self.combo_animeowee.addItem("Tổng Hợp Animeowee (Total)")
+            return
             
-        except Exception as e:
-            QMessageBox.critical(self, "Lỗi", f"Không thể mở cửa sổ tra cứu:\n{e}")
+        old_selection = self.combo_animeowee.currentText()
+        self.combo_animeowee.blockSignals(True)
+        self.combo_animeowee.clear()
+        self.combo_animeowee.addItem("Tổng Hợp Animeowee (Total)")
+        
+        anim_folder = os.path.join(total_folder, 'Animeowee_tracker')
+        if os.path.exists(anim_folder):
+            files = [os.path.splitext(f)[0] for f in os.listdir(anim_folder) if f.endswith('.xlsx')]
+            for name in sorted(files):
+                self.combo_animeowee.addItem(name)
+                
+        self.combo_animeowee.blockSignals(False)
+        index = self.combo_animeowee.findText(old_selection)
+        self.combo_animeowee.setCurrentIndex(index if index >= 0 else 0)
+        self.update_animeowee_table()
+
+    def refresh_project_list(self):
+        total_folder = self.combo_month_proj.currentData()
+        if not total_folder or not os.path.exists(total_folder):
+            self.combo_project.clear()
+            self.combo_project.addItem("Tổng Hợp Theo Dự Án (Project)")
+            return
+            
+        old_selection = self.combo_project.currentText()
+        self.combo_project.blockSignals(True)
+        self.combo_project.clear()
+        self.combo_project.addItem("Tổng Hợp Theo Dự Án (Project)")
+        
+        proj_folder = os.path.join(total_folder, 'Project_Animeowee_tracker')
+        if os.path.exists(proj_folder):
+            files = [os.path.splitext(f)[0] for f in os.listdir(proj_folder) if f.endswith('.xlsx')]
+            for name in sorted(files):
+                self.combo_project.addItem(name)
+                
+        self.combo_project.blockSignals(False)
+        index = self.combo_project.findText(old_selection)
+        self.combo_project.setCurrentIndex(index if index >= 0 else 0)
+        self.update_project_table()
+
+    def update_animeowee_table(self):
+        import pandas as pd
+        self.tree_animeowee.clear()
+        total_folder = self.combo_month_ani.currentData()
+        if not total_folder: return
+        
+        total_folder_name = os.path.basename(total_folder)
+        suffix = total_folder_name.replace('Total_', '')
+        total_file_name = f"Total_{suffix}.xlsx" if suffix != 'Total' else "Total.xlsx"
+        
+        selection = self.combo_animeowee.currentText()
+        
+        # Hiện nút biểu đồ nếu chọn "Total"
+        if selection == "Tổng Hợp Animeowee (Total)":
+            chart_path = os.path.join(total_folder, 'Toan_bo_Animeowee_Chart.png')
+            self.chart_btn_ani.setVisible(os.path.exists(chart_path))
+            file_to_load = os.path.join(total_folder, total_file_name)
+            sheet_name = 'Total_Animeowee'
+        else:
+            self.chart_btn_ani.setVisible(False)
+            file_to_load = os.path.join(total_folder, 'Animeowee_tracker', f"{selection}.xlsx")
+            sheet_name = 0
+            
+        if os.path.exists(file_to_load):
+            try:
+                df = pd.read_excel(file_to_load, sheet_name=sheet_name)
+                self.tree_animeowee.setColumnCount(len(df.columns))
+                self.tree_animeowee.setHeaderLabels([str(c) for c in df.columns])
+                for idx, row in df.iterrows():
+                    self.tree_animeowee.addTopLevelItem(QTreeWidgetItem([str(val) for val in row]))
+                for i in range(len(df.columns)):
+                    self.tree_animeowee.resizeColumnToContents(i)
+            except Exception: pass
+
+    def show_animeowee_chart(self):
+        total_folder = self.combo_month_ani.currentData()
+        if not total_folder: return
+        chart_path = os.path.join(total_folder, 'Toan_bo_Animeowee_Chart.png')
+        if os.path.exists(chart_path):
+            from PySide6.QtWidgets import QDialog, QLabel, QScrollArea
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Biểu Đồ Tổng Kết Điểm")
+            dialog.setMinimumSize(800, 600)
+            dialog_layout = QVBoxLayout(dialog)
+            
+            scroll = QScrollArea()
+            label = QLabel()
+            pixmap = QPixmap(chart_path)
+            label.setPixmap(pixmap)
+            label.setAlignment(Qt.AlignCenter)
+            scroll.setWidget(label)
+            scroll.setWidgetResizable(True)
+            dialog_layout.addWidget(scroll)
+            
+            close_btn = QPushButton("Đóng")
+            close_btn.clicked.connect(dialog.accept)
+            dialog_layout.addWidget(close_btn)
+            
+            dialog.exec()
+
+    def update_project_table(self):
+        import pandas as pd
+        self.tree_project.clear()
+        total_folder = self.combo_month_proj.currentData()
+        if not total_folder: return
+        
+        total_folder_name = os.path.basename(total_folder)
+        suffix = total_folder_name.replace('Total_', '')
+        total_file_name = f"Total_{suffix}.xlsx" if suffix != 'Total' else "Total.xlsx"
+        
+        selection = self.combo_project.currentText()
+        
+        if selection == "Tổng Hợp Theo Dự Án (Project)":
+            file_to_load = os.path.join(total_folder, total_file_name)
+            sheet_name = 'Total_Project'
+        else:
+            file_to_load = os.path.join(total_folder, 'Project_Animeowee_tracker', f"{selection}.xlsx")
+            sheet_name = 0
+            
+        if os.path.exists(file_to_load):
+            try:
+                df = pd.read_excel(file_to_load, sheet_name=sheet_name)
+                self.tree_project.setColumnCount(len(df.columns))
+                self.tree_project.setHeaderLabels([str(c) for c in df.columns])
+                for idx, row in df.iterrows():
+                    self.tree_project.addTopLevelItem(QTreeWidgetItem([str(val) for val in row]))
+                for i in range(len(df.columns)):
+                    self.tree_project.resizeColumnToContents(i)
+            except Exception: pass
+
+    def view_results(self):
+        if not self.path_entry.text() or not os.path.exists(self.path_entry.text()):
+            QMessageBox.warning(self, "Chưa Chọn Thư Mục", "Vui lòng chọn thư mục và xử lý trước!")
+            return
+            
+        self.refresh_month_selectors()
+        
+        if self.combo_month_ani.count() == 0:
+            QMessageBox.information(self, "Thông Báo", "Chưa có dữ liệu thống kê. Vui lòng bấm 'Bắt Đầu Xử Lý' trước!")
+            return
+            
+        # Nhảy qua Tab 2 (Mặc định mở Animeowee)
+        self.tabs.setCurrentIndex(1)
+        self.refresh_animeowee_list()
+        self.refresh_project_list()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     # Thiết lập icon nếu có
-    logo_path = resource_path("Animeow_logo.jpg")
+    logo_path = resource_path("Animeow_logo.ico")
+    if not os.path.exists(logo_path):
+        logo_path = resource_path("Animeow_logo.jpg")
+        
     if os.path.exists(logo_path):
         app.setWindowIcon(QIcon(logo_path))
         

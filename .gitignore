@@ -1,7 +1,7 @@
 __pycache__/
 build/
 dist/
-*.spec
+# *.spec
 Data_All/
 Data_test/
 Data_raw/
